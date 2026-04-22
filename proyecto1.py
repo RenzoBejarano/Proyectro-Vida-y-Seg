@@ -19,6 +19,12 @@ try:
     import joblib
 except ImportError:
     print("Advertencia: Faltan librerías ML/DSP. Ejecuta: pip install librosa scikit-learn numpy joblib")
+    
+try:
+    import sounddevice as sd
+    import scipy.io.wavfile as wav
+except ImportError:
+    print("Advertencia: Faltan librerías de grabación. Ejecuta: pip install sounddevice scipy")
 
 # Configuración inicial del tema moderno
 ctk.set_appearance_mode("Dark")  # Opciones: "System", "Dark", "Light"
@@ -129,7 +135,12 @@ class SistemaSeguridadIndustrial:
             self.cap = cv2.VideoCapture(0)
             self.actualizar_frame()
         else:
-            self.video_panel.config(text="MICRÓFONO VIRTUAL ACTIVADO\n(Visualización no disponible)")
+            instruccion = ctk.CTkLabel(video_frame, text="Teclas: 'A' = Grabar Accidente (2s) | 'N' = Grabar Normal (2s)", text_color="#fbbf24", font=ctk.CTkFont(weight="bold"))
+            instruccion.pack(pady=10)
+            self.monitor_win.bind("<a>", lambda e: self.iniciar_grabacion_audio("accidente"))
+            self.monitor_win.bind("<n>", lambda e: self.iniciar_grabacion_audio("normal"))
+            
+            self.video_panel.config(text="MICRÓFONO ACTIVADO\nPresiona 'A' o 'N' para grabar")
             self.cap = None
 
         self.monitor_win.protocol("WM_DELETE_WINDOW", self.cerrar_monitor)
@@ -137,6 +148,29 @@ class SistemaSeguridadIndustrial:
     # =================================================================
     # A PARTIR DE AQUÍ, LA LÓGICA DE CÓDIGO ES LA MISMA DEL PASO ANTERIOR
     # =================================================================
+    def iniciar_grabacion_audio(self, clase_audio):
+        # Usamos un hilo para que la interfaz no se congele durante los 2 segundos
+        threading.Thread(target=self.grabar_audio_dataset, args=(clase_audio,), daemon=True).start()
+
+    def grabar_audio_dataset(self, clase_audio):
+        self.log(f"🎙️ GRABANDO ({clase_audio.upper()}) por 2 segundos...")
+        try:
+            fs = 44100  # Frecuencia de muestreo (Hz)
+            duracion = 2  # Segundos
+            # Graba audio desde el micrófono predeterminado
+            grabacion = sd.rec(int(duracion * fs), samplerate=fs, channels=1, dtype='int16')
+            sd.wait()  # Espera a que terminen los 2 segundos
+            
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            carpeta = self.dataset_audio_acc if clase_audio == "accidente" else self.dataset_audio_norm
+            ruta = os.path.join(carpeta, f"audio_{timestamp}.wav")
+            
+            wav.write(ruta, fs, grabacion)
+            archivos = len([f for f in os.listdir(carpeta) if f.endswith('.wav')])
+            self.log(f"✅ Audio guardado: {clase_audio.upper()} ({archivos} archivos en total)")
+        except Exception as e:
+            self.log(f"❌ Error al grabar: {str(e)}\nVerifica tu micrófono y que 'sounddevice' esté instalado.")
+
     def guardar_captura(self, tipo):
         if not hasattr(self, 'current_frame'): return
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
